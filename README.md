@@ -4,9 +4,9 @@ This project exposes a 16 KiB window of a Raspberry Pi Pico's RAM to a Commodore
 expansion port. It includes a hardware design and software for the Pico C++ SDK.
 
 <table style="border-collapse: collapse"><tr>
-<td><figure><a href="./docs/pcb.jpg"><img src="./docs/pcb.jpg" alt="PCB photo" width="360" height="360"></a>
+<td><figure><a href="./docs/pcb.jpg"><img src="./docs/pcb.jpg" alt="PCB photo" width="360"></a>
 <figcaption>PCB image</figcaption></figure></td>
-<td><figure><a href="https://youtu.be/zC7R9OgKrbg"><img src="https://img.youtube.com/vi/zC7R9OgKrbg/maxresdefault.jpg" style="width: 360px; height: 360px; object-fit:cover;"></a>
+<td><figure><a href="https://youtu.be/zC7R9OgKrbg"><img src="https://img.youtube.com/vi/zC7R9OgKrbg/maxresdefault.jpg" alt="Demo video thumbnail" width="360"></a>
 <figcaption>Demo video</figcaption></figure>
 </tr></table>
 
