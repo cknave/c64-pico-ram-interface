@@ -1,0 +1,45 @@
+@startuml
+autonumber
+
+participant "Pico CPU" as P
+participant "GPIO pins" as G
+queue "command sm\nTX FIFO" as TX
+queue "command sm\nRX FIFO" as RX
+participant "address decoder PIO\nstate machine" as AD
+participant "command PIO\nstate machine" as CSM
+
+title Handling a command
+
+P -> TX: Put a value on the TX FIFO\nto indicate ready for commands
+
+P -> RX: Wait for a command
+
+== The C64 reads from the command area ==
+
+G -> AD: Wait for ROM read to start\n(ROML or ROMH low)
+
+  AD -> CSM: Trigger by IRQ
+
+G -> CSM: Read the low <b>8-bit address</b> from address bus
+
+  opt if the address is not 00
+
+    CSM -> RX: put <b>8-bit address</b>\non RX FIFO
+
+    TX -> CSM: consume the value from the TX FIFO\nto indicate the CPU is busy
+
+  end
+
+  CSM -> G: Write the STATUS register to data\nbus and set "output enable" low
+
+G -> AD: Wait for ROM read to end\n(ROML or ROMH high)
+
+AD -> G: Set "output enable" high
+
+P <- RX: Pico receives the command\nfrom the RX FIFO
+
+== The Pico handles the command ==
+
+P -> TX: Put a value on the TX FIFO\nto indicate ready for commands
+
+@enduml

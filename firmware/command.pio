@@ -1,0 +1,99 @@
+.program command
+.side_set 1 opt
+
+; Handle a read from the C64 by putting the lower 8 bits of the address on the RX FIFO.  This
+; is used to allow the C64 to "write" a byte to the command queue by reading from a specific
+; block of 256 bytes.
+;
+; It expects to be woken up with IRQ 5 from the address_decoder program when it detects ROMH
+; or ROML is active with the high 6 bits of the address set to the command prefix (configured
+; by address_decoder_program_init).
+;
+; Commands can be queued up to the size of the RX FIFO.  This program will always write one
+; of these values to the data bus:
+;
+; | Value | Description                                  |
+; | 0x00  | CPU was ready when this command was received |
+; | 0xff  | CPU was busy with another command            |
+;
+; The command 0x00 is used to check this status, and will not be sent to the CPU.
+;
+; All other commands will set the busy flag and put the low 8 bits of the address on the RX
+; FIFO.
+;
+; To clear the busy flag, the CPU should put any value on the TX FIFO before waiting for a
+; command. The value will be consumed when a command (other than 0x00) is received.
+;
+; Input pins:
+;   - A0..A13
+; Output pins:
+;   - D0..D7
+; Side-set pins:
+;   - OE
+; Interrupts:
+;   - Waits on IRQ 5
+;   - Sets IRQ 0 when a command is received
+
+start:
+    wait 1 irq 5                    ; wait for address_decoder to detect a read
+    in pins, 8                      ; shift the low 8 bits of the address (the command) into ISR
+    mov x, isr                      ; copy the command to X for comparison
+
+    jmp !x, dont_push               ; if the command is 0, don't send it to the CPU
+    push noblock                    ; push the command from ISR onto the RX FIFO
+    irq set 0                       ; tell the CPU to blink the LED
+dont_push:
+
+    mov pins, status        side 0  ; put STATUS on the data bus (0xff if the TX FIFO is empty,
+                                    ; i.e. busy) and enable output
+
+    jmp !x, start                   ; if the command is 0, don't consume the ready indicator
+    pull noblock                    ; consume the ready indicator, making the TX FIFO empty
+
+
+% c-sdk {
+static inline void command_program_init(
+        PIO pio,
+        uint sm,
+        uint offset,
+        uint a0_pin,
+        uint d0_pin,
+        uint oe_pin) {
+    pio_sm_config c = command_program_get_default_config(offset);
+
+    // Use A0..A13 as input pins
+    sm_config_set_in_pins(&c, a0_pin);
+    for(int i = 0; i < 14; i++) {
+        pio_gpio_init(pio, a0_pin + i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, a0_pin, 14, GPIO_IN);
+
+    // Use D0..D7 as output pins
+    sm_config_set_out_pins(&c, d0_pin, 8);
+    for(int i = 0; i < 8; i++) {
+        pio_gpio_init(pio, d0_pin + i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, d0_pin, 8, GPIO_OUT);
+
+    // Use OE as the side-set pin
+    sm_config_set_sideset_pins(&c, oe_pin);
+    pio_gpio_init(pio, oe_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, oe_pin, 1, GPIO_OUT);
+
+    // Configure the STATUS bits to be set if the TX FIFO is empty.  The CPU can push to
+    // the TX FIFO to signal that it's ready to process a command.
+    sm_config_set_mov_status(&c, STATUS_TX_LESSTHAN, 1);
+
+    // Shift in leftwards so we only fill the low 8 bits of the word (the command)
+    sm_config_set_in_shift(&c,
+                           false, // don't shift right
+                           false, // don't autopush
+                           32);   // push threshold (doesn't matter)
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+    // Set the state machine running
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}

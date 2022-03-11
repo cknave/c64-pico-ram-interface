@@ -1,0 +1,96 @@
+.program address_decoder
+.side_set 1 opt
+
+; Wait for the ROMH or ROML signal to go low, then wake up either the read program or the command
+; program if the high 5 bits of the address match the command prefix.
+;
+; The read/command programs are responsible for setting OE low when the data pins are ready, but
+; this program will take care of setting OE high once ROMH/ROML is high again.
+;
+; The Y register should be initialized with the 5 bit command prefix.
+;
+; Input pins:
+;  - A8..A13
+; Jump pin:
+;  - ROMH or ROML
+; Side-set pin:
+;  - OE
+;
+; Interrupts:
+;  - Sets IRQ 4 on read from non-command-prefixed address
+;  - Sets IRQ 5 on read from command-prefixed address
+
+; 16K:
+; .define public COMMAND_PREFIX 0x3f  ; 6 bit address prefix to match a "command"
+; 8K:
+; BASIC always reads from 9f6e and 9f6f whenever ROM is accessed??!!
+; .define public COMMAND_PREFIX 0x1f  ; 6 bit address prefix to match a "command"
+.define public COMMAND_PREFIX 0x1e  ; 6 bit address prefix to match a "command"
+
+wait_read:
+    jmp pin wait_read               ; wait for ROMH or ROML to go low
+
+    in pins, 6                      ; check whether to send this to DMA or the command queue:
+                                    ; shift the high 6 address bits into ISR
+    mov x, isr                      ; copy the address prefix to X for comparison
+    jmp x!=y, do_dma                ; if the high bits don't match the command prefix, wake up the
+                                    ; read program to to DMA
+
+    irq set 5                       ; otherwise, wake up the command program to put the low 8 bits
+    jmp wait_finished               ; in the command queue
+
+do_dma:
+    irq set 4                       ; wake up the read program to do DMA
+
+wait_finished:
+    jmp pin stop_output             ; wait for ROMH or ROML to go back high
+    jmp wait_finished
+
+stop_output:
+    mov isr, null           side 1  ; disable output and clear ISR for the next comparison
+
+
+% c-sdk {
+static inline void address_decoder_program_init(
+        PIO pio,
+        uint sm,
+        uint offset,
+        uint a8_pin,
+        uint rom_pin,
+        uint oe_pin) {
+    pio_sm_config c = address_decoder_program_get_default_config(offset);
+
+    // Use A8..A13 as input pins
+    sm_config_set_in_pins(&c, a8_pin);
+    for(int i = 0; i < 6; i++) {
+        pio_gpio_init(pio, a8_pin + i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, a8_pin, 6, GPIO_IN);
+
+    // Use ROMH or ROML as the jump pin
+    sm_config_set_jmp_pin(&c, rom_pin);
+    pio_gpio_init(pio, rom_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, rom_pin, 1, GPIO_IN);
+
+    // Use OE as the side-set pin
+    sm_config_set_sideset_pins(&c, oe_pin);
+    pio_gpio_init(pio, oe_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, oe_pin, 1, GPIO_OUT);
+
+    // Shift in leftwards so we only fill the low 6 bits of the word (the address prefix)
+    sm_config_set_in_shift(&c,
+                           false, // don't shift right
+                           false, // don't autopush
+                           32);   // push threshold (doesn't matter)
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+    // Set the state machine running
+    pio_sm_set_enabled(pio, sm, true);
+
+    // Initialize the SM's Y register with the 6 bit address prefix to match
+    pio_sm_put(pio, sm, address_decoder_COMMAND_PREFIX);
+    pio_sm_exec_wait_blocking(pio, sm, pio_encode_pull(false, true));
+    pio_sm_exec(pio, sm, pio_encode_mov(pio_y, pio_osr));
+}
+%}

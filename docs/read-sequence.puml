@@ -1,0 +1,44 @@
+@startuml
+autonumber
+
+participant "GPIO pins" as G
+participant "address decoder PIO\nstate machine" as AD
+participant "read PIO\nstate machine" as RSM
+queue "read sm\nRX FIFO" as RX
+queue "read sm\nTX FIFO" as TX
+participant "DMA\nchannel 1" as D1
+participant "DMA\nchannel 2" as D2
+participant "Pico RAM" as RAM
+
+title Reading the "ROM"
+
+G -> AD: Wait for ROM read to start\n(ROML or ROMH low)
+
+  AD -> RSM: Trigger by IRQ
+
+G -> RSM: Read <b>14-bit address</b> from address bus
+
+  RSM -> RSM: Combine <b>14-bit address</b>\nwith <b>18-bit base address</b>
+
+  RSM -> RX: Put <b>32-bit address</b>\non RX FIFO
+
+    RX -> D1: Trigger by FIFO
+
+      D1 -> D2: Write <b>32-bit address</b> to\nDMA 2 configuration and\ntrigger DMA 2
+
+        D2 -> RAM: Read <b>8-bit data</b>\nfrom <b>32-bit address</b>
+        autonumber stop
+        RAM -> D2
+        autonumber resume
+
+      D2 -> TX: Put <b>8-bit data</b> on TX FIFO
+
+  TX -> RSM: Wait for <b>8-bit data</b> on TX FIFO
+
+RSM -> G: Write <b>8-bit data</b> to data bus\nand set "output enable" low
+
+G -> AD: Wait for ROM read to end\n(ROML or ROMH high)
+
+AD -> G: Set "output enable" high
+
+@enduml

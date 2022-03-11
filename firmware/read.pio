@@ -1,0 +1,80 @@
+.program read
+.side_set 1 opt
+
+; Handle a read from the C64 by sending a byte from the TX fifo on the D0..D7 lines.
+;
+; The address is put on the RX fifo, which is DMA'd to a second DMA's configuration, and that
+; DMA puts the data on the TX fifo. That data is output to the data lines.
+;
+; The lower 18 bits of the Y register must be initialized with the upper 18 bits of the address
+; to read from.
+;
+; Input pins:
+;   - A0..A13
+; Output pins:
+;   - D0..D7
+; Side-set pins:
+;   - OE
+; Interrupts:
+;   - Waits on IRQ 4
+
+
+;
+; Initialization:
+; (need to block before the program starts, otherwise we don't seem to wake up to get our address)
+;
+    pull block                      ; save the base address of the pico's RAM to Y
+    mov y, osr                      ; (should be sent by read_program_init)
+
+;
+; Main loop:
+;
+.wrap_target
+    wait 1 irq 4                    ; wait for address_decoder to detect a read
+    in pins, 14                     ; read low address bits into ISR
+    in y, 18                        ; shift high address bits into ISR to form a complete address
+    push noblock                    ; push the address onto the RX fifo
+    pull block                      ; stall until we load data from the TX fifo into OSR
+    out pins, 8             side 0  ; write 8 bit value from OSR to the data bus and enable output
+.wrap
+
+% c-sdk {
+static inline void read_program_init(
+        PIO pio,
+        uint sm,
+        uint offset,
+        uint d0_pin,
+        uint a0_pin,
+        uint oe_pin,
+        char *base_address) {
+    pio_sm_config c = read_program_get_default_config(offset);
+
+    // Use A0..A13 as input pins
+    sm_config_set_in_pins(&c, a0_pin);
+    for(int i = 0; i < 14; i++) {
+        pio_gpio_init(pio, a0_pin + i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, a0_pin, 14, GPIO_IN);
+
+    // Use D0..D7 as output pins
+    sm_config_set_out_pins(&c, d0_pin, 8);
+    for(int i = 0; i < 8; i++) {
+        pio_gpio_init(pio, d0_pin + i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, d0_pin, 8, GPIO_OUT);
+
+    // Use OE as the side-set pin
+    sm_config_set_sideset_pins(&c, oe_pin);
+    pio_gpio_init(pio, oe_pin);
+    pio_sm_set_consecutive_pindirs(pio, sm, oe_pin, 1, GPIO_OUT);
+
+    // Load our configuration, and jump to the start of the program
+    pio_sm_init(pio, sm, offset, &c);
+    // Set the state machine running
+    pio_sm_set_enabled(pio, sm, true);
+
+    // Initialization is waiting to pull the high 18 bits of the base address
+    pio_sm_put(pio, sm, ((uint32_t)base_address) >> 14);
+}
+
+%}

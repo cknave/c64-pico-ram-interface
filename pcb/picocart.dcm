@@ -1,0 +1,22 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP D_Schottky
+D Schottky diode
+K diode Schottky
+F ~
+$ENDCMP
+#
+$CMP NL17SZ08DBVT1G
+D Logic Gates SINGLE 2-INPUT AND GATE
+$ENDCMP
+#
+$CMP NXB0108PWJ
+D Voltage Level Translator CMOS to CMOS 8-CH Bidirectional T/R
+$ENDCMP
+#
+$CMP SN74LV244APWR
+D Texas Instruments SN74LV244APWR Octal Buffer & Line Driver, 3-State, 2  5.5 V, 20-Pin TSSOP
+F http://www.ti.com/lit/gpn/sn74lv244a
+$ENDCMP
+#
+#End Doc Library

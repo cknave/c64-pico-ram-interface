@@ -1,0 +1,6 @@
+_autosave*
+*-backups
+*-bak
+*.bck
+*-cache
+*-cache.lib
