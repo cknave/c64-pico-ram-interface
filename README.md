@@ -85,3 +85,11 @@ couple of bits.
 I think you're definitely in shift register territory at this point, and good luck trying to
 decode more than a couple of address prefixes in PIO.  If you actually do this, please contact
 me because I want to see it!
+
+
+## Legal
+
+Distribute under the terms of the BSD 3-clause license.
+
+The [KiCad-RP-Pico footprint](https://github.com/ncarandini/KiCad-RP-Pico) is by
+Nicolò Carandini.
