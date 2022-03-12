@@ -41,7 +41,7 @@ To allow the C64 to communicate with the Pico, a 256 byte **command area** is re
 will put that byte onto the RX FIFO for the CPU to consume.  The CPU can put any value onto
 the TX FIFO to signal that it is ready for more commands.
 
-Between the GPIO pins and the RAM, there are four logical components:
+Between the GPIO pins and the RAM, there are five logical components:
 
 - **address_decoder PIO state machine:** monitors the /ROML and /ROMH lines for reads,
   checks if the address is for the special **command area**, and wakes up either the **read**
