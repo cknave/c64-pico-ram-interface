@@ -7,6 +7,9 @@
 #include "hardware/irq.h"
 #include "hardware/pio.h"
 #include "pico/binary_info.h"
+#ifdef LIB_PICO_CYW43_ARCH
+    #include "pico/cyw43_arch.h"
+#endif
 #include "pico/stdlib.h"
 
 #include "address_decoder.pio.h"
@@ -69,10 +72,12 @@ const uint BLINK_MS = 100;
 
 
 void on_pio_irq();
-void do_a_blink();
+void blink_and_set_clear_timer();
 void read_dma_init(PIO pio, uint sm, char *base_address);
 void errorblink(int code) __attribute__((noreturn));
 static inline void init_output_pin(uint pin, bool value);
+static inline bool led_init();
+static inline void led_set(bool on);
 
 
 #pragma clang diagnostic push
@@ -186,10 +191,12 @@ int main() {
             PIN_D0,
             PIN_OE);
 
-    // Set up blinkenlight pin
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
-    gpio_put(PICO_DEFAULT_LED_PIN, 0);
+
+    // Set up LED (and wi-fi if available)
+    if(!led_init()) {
+        printf("Failed to initialize CYW43\n");
+        while(true);  // Can't blink an error code...
+    }
 
     // Install IRQ handler for blinkenlights on read
     // Per the RP2040 datasheet (PIO: IRQ0_INTE Register, p. 399)
@@ -300,12 +307,39 @@ void read_dma_init(PIO pio, uint sm, char *base_address) {
                           true);             // start now
 }
 
+// LED helpers
+static inline bool led_init() {
+    #ifdef PICO_DEFAULT_LED_PIN
+    // Set up blinkenlight pin
+        gpio_init(PICO_DEFAULT_LED_PIN);
+        gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+        gpio_put(PICO_DEFAULT_LED_PIN, 0);
+        return true;
+    #elif defined LIB_PICO_CYW43_ARCH
+        // Set up CYW43 (Pico W wi-fi and LED)
+        int result = cyw43_arch_init();
+        if(result != PICO_OK) {
+            return false;
+        }
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, false);
+        return true;
+    #endif
+}
+
+static inline void led_set(bool on) {
+    #ifdef PICO_DEFAULT_LED_PIN
+        gpio_put(PICO_DEFAULT_LED_PIN, on);
+    #elif defined LIB_PICO_CYW43_ARCH
+        cyw43_arch_gpio_put(CYW43_WL_GPIO_LED_PIN, on);
+    #endif
+}
+
 // Timer for on_clear
 alarm_id_t clear_read_alarm = -1;
 
 // Clear the LED after it's blunk
 int64_t on_clear_led(alarm_id_t alarm_id, void *user_data) {
-    gpio_put(PICO_DEFAULT_LED_PIN, 0);
+    led_set(false);
     clear_read_alarm = -1;
     return 0;
 }
@@ -315,13 +349,13 @@ void on_pio_irq() {
     PIO pio = pio0;
     if(pio->irq & PIO_IRQ_ON_READ) {
         hw_clear_bits(&pio->irq, PIO_IRQ_ON_READ);
-        do_a_blink();
+        blink_and_set_clear_timer();
     }
 }
 
-void do_a_blink() {
+void blink_and_set_clear_timer() {
     // Turn on the LED
-    gpio_put(PICO_DEFAULT_LED_PIN, 1);
+    led_set(true);
 
     // If we already had a timer to turn it off, cancel it
     if(clear_read_alarm > 0) {
@@ -334,13 +368,12 @@ void do_a_blink() {
 
 // Repeat a series of blinks forever
 void errorblink(int code) {
-    gpio_init(PICO_DEFAULT_LED_PIN);
-    gpio_set_dir(PICO_DEFAULT_LED_PIN, GPIO_OUT);
+    led_init();
     while(true) {
         for(int i = 0; i < code; i++) {
-            gpio_put(PICO_DEFAULT_LED_PIN, 1);
+            led_set(true);
             sleep_ms(333);
-            gpio_put(PICO_DEFAULT_LED_PIN, 0);
+            led_set(false);
             sleep_ms(333);
         }
         sleep_ms(667);
