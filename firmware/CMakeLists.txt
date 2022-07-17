@@ -10,11 +10,12 @@ pico_sdk_init()
 
 add_executable(c64_pico_ram_interface
     c64_pico_ram_interface.c
+    wifi.c
     ../c64-rom/loader_rom.c
     ../c64-rom/raspi.c
 )
 
-include_directories(../c64-rom)
+include_directories(../c64-rom PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 pico_set_program_name(c64_pico_ram_interface "c64 pico ram interface")
 pico_set_program_description(c64_pico_ram_interface "expose pico ram as a c64 rom")
@@ -31,6 +32,6 @@ pico_add_extra_outputs(c64_pico_ram_interface)
 target_link_libraries(c64_pico_ram_interface
     hardware_dma
     hardware_pio
-    pico_cyw43_arch_none
+    pico_cyw43_arch_lwip_poll
     pico_stdlib
 )
