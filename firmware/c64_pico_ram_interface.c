@@ -12,7 +12,7 @@
 
 #include "address_decoder.pio.h"
 #include "command.pio.h"
-#include "loader_rom.h"
+#include "exposed_ram.h"
 #include "raspi.h"
 #include "read.pio.h"
 #include "wifi.h"
@@ -57,36 +57,13 @@ const uint PIN_OE = 28;
 // PIO IRQ bits
 const uint PIO_IRQ_ON_READ = 1;
 
-// NUFLI offset in our ROM area
-const uint NUFLI_OFFSET = 0x400;
-const uint NUFLI_WINDOW_SIZE = 0x400;
-
-// Wi-fi scan result structure for the exposed result page
-const uint WIFI_SCAN_RESULT_OFFSET = 0x200;
-#pragma pack(push, 1)
-struct ExposedWiFiScanPageEntry {
-    char ssid[33];  // null terminated
-    uint8_t bars;
-};
-#define EXPOSED_WIFI_SCAN_RESULT_PAGE_SIZE 10
-struct ExposedWiFiScanResult {
-    uint8_t scan_active;
-    uint8_t current_page;
-    uint8_t has_next_page;
-    struct ExposedWiFiScanPageEntry items[EXPOSED_WIFI_SCAN_RESULT_PAGE_SIZE];
-};
-#pragma pack(pop)
-// Will be filled in once the exposed memory area is allocated
-struct ExposedWiFiScanResult *wifi_scan_result;
-
-
 // Use the high 3 bits of a command to set the number of arguments it takes
 #define NUM_ARGS(x) (((x) & 0b111) << 5)
 
 typedef enum {
     CMD_NEXT_PAGE = 0x01,   // Advance the NUFLI window to the next 1K
     CMD_SLEEP = 0x02,       // Test a slow command that sleeps for 5 seconds
-    CMD_WIFI_CONNECT = 0x03 | NUM_ARGS(2),  // Connect to wi-fi, args: ssid, password
+    CMD_WIFI_CONNECT = 0x03 | NUM_ARGS(3),  // Connect to wi-fi, args: ssid, password, auth
     CMD_WIFI_SCAN = 0x04,   // Start wi-fi scan
 } command_t;
 
@@ -154,26 +131,13 @@ int main() {
     printf("\n\n\n");
     printf("C64 pico ram interface %s\n", PICO_PROGRAM_VERSION_STRING);
 
+    // Initialize the exposed RAM area
+    init_exposed_ram(16384);
+
     // Initialize the last wi-fi poll time
     wifi_init();
 
-    // Data exposed by the ROM window must be aligned by 16 kbytes so we can use the least
-    // significant bits of its address for A0-A13
-    const int rom_size = 16384;
-    char *rom_data = memalign(rom_size, rom_size);
-
-    // Initialize the ROM area with our loader ROM
-    memcpy(rom_data, loader_rom, sizeof(loader_rom));
-
-    // Initialize the NUFLI area of our ROM with the first 1KB
-    int raspi_offset = 0;
-    memcpy(rom_data + NUFLI_OFFSET, raspi, NUFLI_WINDOW_SIZE);
-
-    // Initialize the wi-fi scan result area
-    wifi_scan_result = (struct ExposedWiFiScanResult *)(
-            rom_data + WIFI_SCAN_RESULT_OFFSET);
-    memset(wifi_scan_result, 0, sizeof(struct ExposedWiFiScanResult));
-
+    // Use PIO 0 for C64 PIO programs
     PIO pio = pio0;
 
     // Address decoder: waits for ROMH/ROML line to be set low, and determines whether the address
@@ -214,8 +178,8 @@ int main() {
             PIN_D0,
             PIN_A0,
             PIN_OE,
-            rom_data);
-    read_dma_init(pio, read_sm, rom_data);
+            exposed_ram);
+    read_dma_init(pio, read_sm, exposed_ram);
 
     // Command handler: put command NN on the FIFO when the CPU reads from address $BFNN
     if(!pio_can_add_program(pio, &command_program)) {
@@ -256,15 +220,15 @@ int main() {
     printf("Address decoder ROML sm: %d\n", address_decoder_sm[1]);
     printf("Read sm: %d\n", read_sm);
     printf("Command sm: %d\n", command_sm);
-    printf("Pico RAM window start: 0x%08X\n", (uint)rom_data);
+    printf("Pico RAM window start: 0x%08X\n", (uint)exposed_ram);
     printf("First 8 bytes of ROM: %02X %02X %02X %02X %02X %02X %02X %02X\n",
-           rom_data[0], rom_data[1], rom_data[2], rom_data[3], rom_data[4], rom_data[5],
-           rom_data[6], rom_data[7]);
+           exposed_ram[0], exposed_ram[1], exposed_ram[2], exposed_ram[3], exposed_ram[4],
+           exposed_ram[5], exposed_ram[6], exposed_ram[7]);
     printf("First 8 bytes of NUFLI: %02X %02X %02X %02X %02X %02X %02X %02X\n",
-           ((char *)(rom_data + NUFLI_OFFSET))[0], ((char *)(rom_data + NUFLI_OFFSET))[1],
-           ((char *)(rom_data + NUFLI_OFFSET))[2], ((char *)(rom_data + NUFLI_OFFSET))[3],
-           ((char *)(rom_data + NUFLI_OFFSET))[4], ((char *)(rom_data + NUFLI_OFFSET))[5],
-           ((char *)(rom_data + NUFLI_OFFSET))[6], ((char *)(rom_data + NUFLI_OFFSET))[7]);
+           ((char *)(exposed_ram + NUFLI_OFFSET))[0], ((char *)(exposed_ram + NUFLI_OFFSET))[1],
+           ((char *)(exposed_ram + NUFLI_OFFSET))[2], ((char *)(exposed_ram + NUFLI_OFFSET))[3],
+           ((char *)(exposed_ram + NUFLI_OFFSET))[4], ((char *)(exposed_ram + NUFLI_OFFSET))[5],
+           ((char *)(exposed_ram + NUFLI_OFFSET))[6], ((char *)(exposed_ram + NUFLI_OFFSET))[7]);
     printf("ROM address: $8000\n");
     printf("Command address prefix: $%04X\n", 0x8000 + (address_decoder_COMMAND_PREFIX << 8));
 
@@ -282,13 +246,16 @@ int main() {
 
         switch(command.command_type) {
             case CMD_NEXT_PAGE:
-                raspi_offset += NUFLI_WINDOW_SIZE;
-                if(raspi_offset >= sizeof(raspi)) {
-                    raspi_offset = 0;
+                current_nufli_offset += NUFLI_WINDOW_SIZE;
+                if(current_nufli_offset >= sizeof(raspi)) {
+                    current_nufli_offset = 0;
                 }
-                printf("NUFLI start is now %02X\n", (uint)raspi_offset);
-                memcpy(rom_data + NUFLI_OFFSET, raspi + raspi_offset, NUFLI_WINDOW_SIZE);
-                printf("First 8 bytes: %02X %02X %02X %02X %02X %02X %02X %02X\n", ((char *)(rom_data + NUFLI_OFFSET))[0], ((char *)(rom_data + NUFLI_OFFSET))[1], ((char *)(rom_data + NUFLI_OFFSET))[2], ((char *)(rom_data + NUFLI_OFFSET))[3], ((char *)(rom_data + NUFLI_OFFSET))[4], ((char *)(rom_data + NUFLI_OFFSET))[5], ((char *)(rom_data + NUFLI_OFFSET))[6], ((char *)(rom_data + NUFLI_OFFSET))[7]);
+                printf("NUFLI start is now %02X\n", (uint)current_nufli_offset);
+                memcpy(exposed_nufli_page, raspi + current_nufli_offset, NUFLI_WINDOW_SIZE);
+                printf("First 8 bytes: %02X %02X %02X %02X %02X %02X %02X %02X\n",
+                       exposed_nufli_page[0], exposed_nufli_page[1], exposed_nufli_page[2],
+                       exposed_nufli_page[3], exposed_nufli_page[4], exposed_nufli_page[5],
+                       exposed_nufli_page[6], exposed_nufli_page[7]);
                 break;
 
         	case CMD_SLEEP:
@@ -298,11 +265,12 @@ int main() {
 		        break;
 
             case CMD_WIFI_CONNECT: {
+                wifi_auth_t auth = (wifi_auth_t)(command.args[2].data[0]);
                 cyw43_arch_enable_sta_mode();
                 int rc = cyw43_arch_wifi_connect_timeout_ms(
                         command.args[0].data,
                         command.args[1].data,
-                        CYW43_AUTH_WPA2_AES_PSK,
+                        cyw43_auth_for(auth),
                         WIFI_CONNECT_TIMEOUT);
                 if(rc == 0) {
                     printf("Connected to wi-fi \"%s\"\n", command.args[0].data);
@@ -518,34 +486,8 @@ static inline uint32_t arg_to_uint32(CommandArgument *arg) {
 }
 
 static void on_wifi_scan_update(WiFiScan *scan, WiFiScanItem *item) {
-    switch(scan->state) {
-        case WIFI_SCAN_COMPLETE:
-        case WIFI_SCAN_FAILED:
-        case WIFI_SCAN_NOT_STARTED:
-            wifi_scan_result->scan_active = 0;
-            break;
-
-        case WIFI_SCAN_IN_PROGRESS: {
-            wifi_scan_result->scan_active = 1;
-            uint page_start = wifi_scan_result->current_page * EXPOSED_WIFI_SCAN_RESULT_PAGE_SIZE;
-            uint page_end = page_start + EXPOSED_WIFI_SCAN_RESULT_PAGE_SIZE - 1;
-            if(item->index >= page_start && item->index <= page_end) {
-                uint page_index = item->index % EXPOSED_WIFI_SCAN_RESULT_PAGE_SIZE;
-                struct ExposedWiFiScanPageEntry *entry = &wifi_scan_result->items[page_index];
-                strcpy(entry->ssid, item->ssid);
-                if(item->rssi < -90) {
-                    entry->bars = 0;
-                } else if(item->rssi < -80) {
-                    entry->bars = 1;
-                } else if(item->rssi < -70) {
-                    entry->bars = 2;
-                } else if(item->rssi < -67) {
-                    entry->bars = 3;
-                } else {
-                    entry->bars = 4;
-                }
-            }
-        }
-
+    exposed_wifi_scan_result->scan_state = scan->state;
+    if(scan->state == WIFI_SCAN_IN_PROGRESS) {
+        set_wifi_scan_result_item(item);
     }
 }

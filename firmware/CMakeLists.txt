@@ -10,6 +10,7 @@ pico_sdk_init()
 
 add_executable(c64_pico_ram_interface
     c64_pico_ram_interface.c
+    exposed_ram.c
     wifi.c
     ../c64-rom/loader_rom.c
     ../c64-rom/raspi.c

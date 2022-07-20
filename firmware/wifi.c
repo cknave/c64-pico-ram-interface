@@ -5,6 +5,12 @@
 
 #include "wifi.h"
 
+// When the Pico W shipped, the wifi scan auth_mode field was being truncated to 8 bits
+// https://github.com/georgerobotics/cyw43-driver/issues/3
+// https://github.com/georgerobotics/cyw43-driver/commit/7a20b316c70896f104cbfd12b8537a7f5b97f487
+static_assert(sizeof(((cyw43_ev_scan_result_t *)0)->auth_mode) == sizeof(uint32_t),
+              "Current wi-fi driver has truncated auth_mode field in scan result");
+
 // Timeout to connect to wi-fi (milliseconds)
 const uint32_t WIFI_CONNECT_TIMEOUT = 30000;
 
@@ -119,7 +125,8 @@ static WiFiScanItem *wifi_scan_upsert(WiFiScan *wifi_scan, const cyw43_ev_scan_r
         wifi_scan->num_items++;
     }
 
-    // Update the rssi
+    // Update the rssi and auth values
     result_item->rssi = result->rssi;
+    result_item->auth = auth_for(result->auth_mode);
     return result_item;
 }

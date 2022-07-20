@@ -4,18 +4,57 @@
 #include "pico/cyw43_arch.h"
 #endif
 
-typedef enum {
+typedef enum __attribute__ ((__packed__)) {
     WIFI_SCAN_NOT_STARTED,
     WIFI_SCAN_IN_PROGRESS,
     WIFI_SCAN_COMPLETE,
     WIFI_SCAN_FAILED,
 } wifi_scan_state_t;
 
+typedef enum __attribute__ ((__packed__)) {
+    WIFI_AUTH_UNKNOWN = 0,
+    WIFI_AUTH_OPEN = 1,
+    WIFI_AUTH_WPA_TKIP = 2,
+    WIFI_AUTH_WPA2_AES = 3,
+    WIFI_AUTH_WPA2_MIXED = 4,
+} wifi_auth_t;
+
+// Convert WIFI_AUTH enum to cyw43 auth constant
+static inline uint32_t cyw43_auth_for(wifi_auth_t auth) {
+    switch(auth) {
+        case WIFI_AUTH_WPA_TKIP:
+            return CYW43_AUTH_WPA_TKIP_PSK;
+        case WIFI_AUTH_WPA2_AES:
+            return CYW43_AUTH_WPA2_AES_PSK;
+        case WIFI_AUTH_WPA2_MIXED:
+            return CYW43_AUTH_WPA2_MIXED_PSK;
+        default:
+            return 0;
+    }
+}
+
+// Convert cyw43 auth constant to WIFI_AUTH enum
+static inline wifi_auth_t auth_for(uint32_t cyw43_auth) {
+    switch(cyw43_auth) {
+        case 0:
+            return WIFI_AUTH_OPEN;
+        case CYW43_AUTH_WPA_TKIP_PSK:
+            return WIFI_AUTH_WPA_TKIP;
+        case CYW43_AUTH_WPA2_AES_PSK:
+            return WIFI_AUTH_WPA2_AES;
+        case CYW43_AUTH_WPA2_MIXED_PSK:
+            return WIFI_AUTH_WPA2_MIXED;
+        default:
+            return WIFI_AUTH_UNKNOWN;
+    }
+}
+
 typedef struct WiFiScanItem WiFiScanItem;
 struct WiFiScanItem {
     int index;
     char *ssid;
     int rssi;
+    wifi_auth_t auth;
     WiFiScanItem *next;
 };
 
