@@ -5,17 +5,10 @@
 
 #include "wifi.h"
 
-// When the Pico W shipped, the wifi scan auth_mode field was being truncated to 8 bits
-// https://github.com/georgerobotics/cyw43-driver/issues/3
-// https://github.com/georgerobotics/cyw43-driver/commit/7a20b316c70896f104cbfd12b8537a7f5b97f487
-static_assert(sizeof(((cyw43_ev_scan_result_t *)0)->auth_mode) == sizeof(uint32_t),
-              "Current wi-fi driver has truncated auth_mode field in scan result");
-
 // Timeout to connect to wi-fi (milliseconds)
 const uint32_t WIFI_CONNECT_TIMEOUT = 30000;
 
 absolute_time_t last_wifi_poll_time;
-static absolute_time_t scan_start;
 static repeating_timer_t scan_state_poll_timer;
 
 WiFiScan current_wifi_scan;
@@ -30,7 +23,6 @@ static bool on_poll_scan_state(repeating_timer_t *timer);
 void wifi_init() {
     last_wifi_poll_time = nil_time;
 
-    scan_start = nil_time;
     scan_state_poll_timer.alarm_id = 0;
     current_wifi_scan.state = WIFI_SCAN_NOT_STARTED;
     current_wifi_scan.num_items = 0;
@@ -73,6 +65,7 @@ static int on_scan_result(void *env, const cyw43_ev_scan_result_t *result) {
         WiFiScanItem *item = wifi_scan_upsert(&current_wifi_scan, result);
         cb(&current_wifi_scan, item);
     }
+    return 0;
 }
 
 static bool on_poll_scan_state(repeating_timer_t *timer) {
@@ -104,9 +97,9 @@ static WiFiScanItem *wifi_scan_upsert(WiFiScan *wifi_scan, const cyw43_ev_scan_r
     WiFiScanItem **next_ptr = &wifi_scan->first;
     WiFiScanItem *result_item = NULL;
     WiFiScanItem *curr;
-    while(curr = *next_ptr) {
+    while((curr = *next_ptr)) {
         next_ptr = &curr->next;
-        if(!strncmp(curr->ssid, result->ssid, result->ssid_len)) {
+        if(!strncmp(curr->ssid, (char *)result->ssid, result->ssid_len)) {
             printf("\nUpdating %s\n", curr->ssid);
             result_item = curr;
             break;
@@ -116,7 +109,7 @@ static WiFiScanItem *wifi_scan_upsert(WiFiScan *wifi_scan, const cyw43_ev_scan_r
     // If none was found, create one
     if(!result_item) {
         result_item = malloc(sizeof(WiFiScanItem));
-        result_item->ssid = strndup(result->ssid, result->ssid_len);
+        result_item->ssid = strndup((char *)result->ssid, result->ssid_len);
         printf("\nInserting %s\n", result_item->ssid);
         result_item->index = wifi_scan->num_items;
         result_item->next = NULL;
@@ -127,6 +120,6 @@ static WiFiScanItem *wifi_scan_upsert(WiFiScan *wifi_scan, const cyw43_ev_scan_r
 
     // Update the rssi and auth values
     result_item->rssi = result->rssi;
-    result_item->auth = auth_for(result->auth_mode);
+    result_item->auth = wifi_auth_for_auth_mode(result->auth_mode);
     return result_item;
 }

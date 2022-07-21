@@ -241,7 +241,12 @@ int main() {
         read_command(pio, command_sm, &command);
         printf("\nGot command %02X (%d args)\n", command.command_type & 0b00011111, command.num_args);
         for(uint i = 0; i < command.num_args; i++) {
-            printf("Argument %d (%d bytes): \"%s\"\n", i + 1, command.args[i].length, command.args[i].data);
+            if(command.args[i].length == 1) {
+                char c = (char)command.args[i].data[0];
+                printf("Argument %d (1 byte): \"%c\" (%02X)\n", i + 1, isprint(c) ? c : '.', c);
+            } else {
+                printf("Argument %d (%d bytes): \"%s\"\n", i + 1, command.args[i].length, command.args[i].data);
+            }
         }
 
         switch(command.command_type) {
@@ -268,8 +273,8 @@ int main() {
                 wifi_auth_t auth = (wifi_auth_t)(command.args[2].data[0]);
                 cyw43_arch_enable_sta_mode();
                 int rc = cyw43_arch_wifi_connect_timeout_ms(
-                        command.args[0].data,
-                        command.args[1].data,
+                        (char *)command.args[0].data,
+                        (char *)command.args[1].data,
                         cyw43_auth_for(auth),
                         WIFI_CONNECT_TIMEOUT);
                 if(rc == 0) {

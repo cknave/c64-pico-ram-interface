@@ -33,20 +33,27 @@ static inline uint32_t cyw43_auth_for(wifi_auth_t auth) {
     }
 }
 
+// cyw43_ll.h doesn't define constants for these
+#define CYW43_SCAN_AUTH_MODE_WEP_PSK    0b001
+#define CYW43_SCAN_AUTH_MODE_WPA        0b010
+#define CYW43_SCAN_AUTH_MODE_WPA2       0b100
+
 // Convert cyw43 auth constant to WIFI_AUTH enum
-static inline wifi_auth_t auth_for(uint32_t cyw43_auth) {
-    switch(cyw43_auth) {
-        case 0:
-            return WIFI_AUTH_OPEN;
-        case CYW43_AUTH_WPA_TKIP_PSK:
-            return WIFI_AUTH_WPA_TKIP;
-        case CYW43_AUTH_WPA2_AES_PSK:
-            return WIFI_AUTH_WPA2_AES;
-        case CYW43_AUTH_WPA2_MIXED_PSK:
-            return WIFI_AUTH_WPA2_MIXED;
-        default:
-            return WIFI_AUTH_UNKNOWN;
+static inline wifi_auth_t wifi_auth_for_auth_mode(uint8_t auth_mode) {
+    if(auth_mode == 0) {
+        return WIFI_AUTH_OPEN;
     }
+    // Really just guessing at the mapping between these and the CYW43_AUTH_* constants
+    switch(auth_mode & ~CYW43_SCAN_AUTH_MODE_WEP_PSK) {
+        case CYW43_SCAN_AUTH_MODE_WPA:
+            return WIFI_AUTH_WPA_TKIP;
+        case CYW43_SCAN_AUTH_MODE_WPA2:
+            return WIFI_AUTH_WPA2_AES;
+        case CYW43_SCAN_AUTH_MODE_WPA | CYW43_SCAN_AUTH_MODE_WPA2:
+            return WIFI_AUTH_WPA2_MIXED;
+    }
+    return WIFI_AUTH_UNKNOWN;
+
 }
 
 typedef struct WiFiScanItem WiFiScanItem;

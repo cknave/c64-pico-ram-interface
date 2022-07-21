@@ -8,6 +8,9 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 pico_sdk_init()
 
+# Override default hostname so we can tell what device this is on wi-fi
+add_definitions(-DCYW43_HOST_NAME="Pico16k")
+
 add_executable(c64_pico_ram_interface
     c64_pico_ram_interface.c
     exposed_ram.c
